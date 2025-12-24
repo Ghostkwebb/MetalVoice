@@ -1,0 +1,14 @@
+
+.DS_Store
+/.build
+/Packages
+/*.xcodeproj
+/*.xcworkspace
+xcuserdata/
+derivedData/
+.swiftpm/
+configuration/registries/
+MetalVoice.app/
+*.zip
+*.mlpackage
+*.mlmodelc
