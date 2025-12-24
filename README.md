@@ -2,7 +2,7 @@
 
   <img src="Resources/MetalVoiceLogo.png" alt="MetalVoice Logo" width="160" height="160" />
 
-  # MetalVoice 🎙️
+  # MetalVoice 
 
   **AI-Powered Noise Suppression for macOS**
 
