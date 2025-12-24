@@ -51,7 +51,6 @@
 <div align="center">
   <img src="https://github.com/user-attachments/assets/a6aa58a6-5e54-463c-9b10-5f9a41f97967" alt="Settings Window" width="600" />
   <br>
-  <em>(Concept: Modern, Glass-morphic UI)</em>
 </div>
 
 1.  **Launch**: Look for the **Waveform Icon 🌊** in your menu bar.
