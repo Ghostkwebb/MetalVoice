@@ -1,52 +1,80 @@
-# MetalVoice 🎙️
+<div align="center">
 
-**MetalVoice** is a macOS menu bar application that uses AI (DeepFilterNet) to remove background noise and room reverb from your microphone in real-time. Built with Swift, Metal Performance Shaders, and CoreML.
+  <img src="Resources/MetalVoiceLogo.png" alt="MetalVoice Logo" width="160" height="160" />
 
-<p align="center">
-  <img src="Resources/MetalVoiceLogo.png" width="128" height="128" alt="MetalVoice Logo">
-</p>
+  # MetalVoice 🎙️
 
-## Features ✨
+  **AI-Powered Noise Suppression for macOS**
 
-*   **Real-time Noise Suppression**: Removes fans, typing, loud clicks, and background chatter.
-*   **De-Reverberation**: Reduces room echo for a studio-quality sound.
-*   **Low Latency**: Optimized for real-time communication (~20-40ms latency).
-*   **Privacy First**: All processing happens **on-device** using the Apple Neural Engine. No audio ever leaves your Mac.
-*   **Lightweight**: Runs unobtrusively in your menu bar.
-*   **Universal Support**: Works with any input device (USB mics, Built-in mics) and outputs to Virtual Cables (BlackHole, VB-Cable).
+  [![Swift 5](https://img.shields.io/badge/Swift-5.0-orange.svg?style=flat-square)](https://developer.apple.com/swift/)
+  [![Platform](https://img.shields.io/badge/Platform-macOS%20(Apple%20Silicon)-lightgrey.svg?style=flat-square)](https://www.apple.com/mac/)
+  [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+  [![Release](https://img.shields.io/github/v/release/Ghostkwebb/MetalVoice?style=flat-square)](https://github.com/Ghostkwebb/MetalVoice/releases/latest)
 
-## Installation 📥
+  <p>
+    <b>MetalVoice</b> uses state-of-the-art Deep Learning (DeepFilterNet) to eliminate background noise and room reverb in real-time. 
+    <br>
+    Built exclusively for <b>Apple Silicon</b>, leveraging the Neural Engine for zero-latency performance.
+  </p>
 
-1.  Download the latest release from the [Releases Page](../../releases).
-2.  Unzip `MetalVoice_v1.0.zip`.
-3.  Drag `MetalVoice.app` to your **Applications** folder.
-4.  Right-click and select **Open** (to bypass Gatekeeper if unsigned).
+  <a href="https://github.com/Ghostkwebb/MetalVoice/releases/latest/download/MetalVoice_v1.0.zip">
+    <img src="https://img.shields.io/badge/Download-MetalVoice_v1.0-blue?style=for-the-badge&logo=apple&logoColor=white" alt="Download MetalVoice" />
+  </a>
 
-## Usage 🛠️
+</div>
 
-1.  **Launch MetalVoice**: You will see a waveform icon 🌊 in your menu bar.
-2.  **Open Settings**: Click the gear icon inside the menu.
-3.  **Select Microphone**: Choose your physical microphone as the **Input Device**.
-4.  **Select Output**: Choose a virtual audio driver like **BlackHole 2ch** (Recommended) or VB-Cable as the **Output Device**.
-5.  **Configure Chat Apps**: In Discord, Zoom, or OBS, set your Input Device to the **same virtual cable** (e.g., "BlackHole 2ch").
-6.  **Enable AI**: Toggle the switch to **ON**. Your voice is now enhanced! 🚀
+<br />
 
-> **Note**: If you don't have BlackHole installed, you can get it [here](https://github.com/ExistentialAudio/BlackHole) or via Homebrew (`brew install blackhole-2ch`).
+> [!IMPORTANT]
+> **Requirement**: This application **REQUIRES a Mac with Apple Silicon (M1, M2, M3, or newer)**. It relies on the Apple Neural Engine and Metal Performance Shaders optimized for these chips. It will not work on Intel Macs.
 
-## Tech Stack 💻
+---
 
-*   **Language**: Swift 5
-*   **UI**: SwiftUI (macOS)
-*   **Audio Engine**: AVFoundation & Accelerate (vDSP)
-*   **AI Model**: [DeepFilterNet3](https://github.com/Rikorose/DeepFilterNet) (Converted to CoreML)
-*   **Inference**: CoreML + Metal Performance Shaders
+## ✨ Features
 
-## Credits 🙏
+*   **🚫 Silence the Noise**: Instantly removes fans, typing, air conditioning, and background chatter.
+*   **🗣️ Studio Clarity**: De-reverberation clears up "roomy" echoes, making you sound like you're in a studio.
+*   **⚡ Zero Latency Feel**: Optimized Metal pipeline ensures negligible delay tailored for real-time communication.
+*   **🔒 Privacy First**: 100% On-Device. Your voice is processed locally on your Neural Engine. No data leaves your Mac.
+*   **🛠️ Universal**: Works with **any** microphone (USB, XLR, Built-in) and outputs to **any** app via virtual cables.
 
-*   **DeepFilterNet**: The incredible noise suppression model is created by [Hendrik Schröter (Rikorose)](https://github.com/Rikorose). This app uses a CoreML conversion of the DeepFilterNet3 model.
-*   **Accelerate Framework**: For efficient DSP (FFT, Windowing).
+## 📥 Installation
 
-## License 📄
+1.  **Download**: Get the latest version from the [Releases Page](https://github.com/Ghostkwebb/MetalVoice/releases/latest).
+2.  **Unzip**: Extract `MetalVoice_v1.0.zip`.
+3.  **Install**: Drag `MetalVoice.app` to your **Applications** folder.
+4.  **Open**: Right-click and choose **Open** (necessary for the first launch to verify the developer).
+    *   *Note: If prompted about "Malicious Software", go to System Settings -> Privacy & Security -> Open Anyway.*
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-The DeepFilterNet model weights are used under their respective license (MIT/Apache 2.0).
+## 🚀 Usage Guide
+
+<div align="center">
+  <img src="https://placehold.co/600x400/1a1a1a/ffffff?text=Settings+Window+Screenshot" alt="Settings Window" width="600" />
+  <br>
+  <em>(Concept: Modern, Glass-morphic UI)</em>
+</div>
+
+1.  **Launch**: Look for the **Waveform Icon 🌊** in your menu bar.
+2.  **Select Input**: Click the gear ⚙️ icon. Set **Input Device** to your physical microphone.
+3.  **Select Output**: Set **Output Device** to a Virtual Audio Cable (Recommended: **[BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)**).
+    *   *This routes the "Clean" audio into the cable.*
+4.  **Configure Apps**: inside Discord/Zoom/OBS, set your **Microphone Input** to that same Virtual Cable (e.g., BlackHole 2ch).
+5.  **Enable AI**: Toggle the switch **ON** in the MetalVoice menu. Enjoy crystal clear audio!
+
+## 💻 Tech Stack
+
+*   **Core**: Swift 5, SwiftUI
+*   **Audio**: AVFoundation, Accelerate (vDSP)
+*   **AI Engine**: CoreML + Metal Performance Shaders (MPS)
+*   **Model**: [DeepFilterNet3](https://github.com/Rikorose/DeepFilterNet) (Streaming UNet)
+
+## 🙏 Credits
+
+*   **DeepFilterNet**: Developed by [Hendrik Schröter (Rikorose)](https://github.com/Rikorose). DeepFilterNet is one of the most efficient noise suppression models available. MetalVoice uses a custom CoreML implementation of this architecture.
+*   **Icons**: SF Symbols by Apple.
+
+---
+
+<div align="center">
+  <p>Made with ❤️ for macOS</p>
+</div>
