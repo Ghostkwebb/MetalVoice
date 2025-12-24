@@ -49,7 +49,7 @@
 ## 🚀 Usage Guide
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/a6aa58a6-5e54-463c-9b10-5f9a41f97967" alt="Settings Window" width="600" />
+  <img src="https://github.com/user-attachments/assets/b88f1258-34a1-4419-8c8b-ce5fa869523c" alt="Settings Window" width="600" />
   <br>
 </div>
 
