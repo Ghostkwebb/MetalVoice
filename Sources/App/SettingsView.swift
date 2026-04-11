@@ -92,7 +92,7 @@ struct GeneralSettingsView: View {
             HStack {
                 Image(systemName: "info.circle")
                     .foregroundColor(.secondary)
-                Text("MetalVoice v1.0 • Built with DeepFilterNet")
+                Text("MetalVoice v1.1 • Built with DeepFilterNet")
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 Spacer()

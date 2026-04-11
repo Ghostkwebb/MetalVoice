@@ -217,7 +217,13 @@ class DeepFilterNet3_Streaming {
             return URL(fileURLWithPath: localPath)
         }
         
-        fatalError("Could not find DeepFilterNet3_Streaming.mlmodelc in Bundle.main, Bundle(for: self), or Resources/ folder.")
+        // Distributed CLI fallback (next to MetalVoice.app)
+        let appBundlePath = Bundle.main.bundleURL.appendingPathComponent("MetalVoice.app/Contents/Resources/DeepFilterNet3_Streaming.mlmodelc")
+        if FileManager.default.fileExists(atPath: appBundlePath.path) {
+            return appBundlePath
+        }
+        
+        fatalError("Could not find DeepFilterNet3_Streaming.mlmodelc in Bundle.main, Bundle(for: self), Resources/, or adjacent MetalVoice.app")
     }
 
     /**
