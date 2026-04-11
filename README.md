@@ -17,8 +17,8 @@
     Built exclusively for <b>Apple Silicon</b>, leveraging the Neural Engine for zero-latency performance.
   </p>
 
-  <a href="https://github.com/Ghostkwebb/MetalVoice/releases/latest/download/MetalVoice_v1.0.zip">
-    <img src="https://img.shields.io/badge/Download-MetalVoice_v1.0-blue?style=for-the-badge&logo=apple&logoColor=white" alt="Download MetalVoice" />
+  <a href="https://github.com/Ghostkwebb/MetalVoice/releases/latest/download/MetalVoice_v1.1.zip">
+    <img src="https://img.shields.io/badge/Download-MetalVoice_v1.1-blue?style=for-the-badge&logo=apple&logoColor=white" alt="Download MetalVoice" />
   </a>
 
 </div>
@@ -41,7 +41,7 @@
 ## 📥 Installation
 
 1.  **Download**: Get the latest version from the [Releases Page](https://github.com/Ghostkwebb/MetalVoice/releases/latest).
-2.  **Unzip**: Extract `MetalVoice_v1.0.zip`.
+2.  **Unzip**: Extract `MetalVoice_v1.1.zip`. Inside, you'll find the GUI `MetalVoice.app` and the terminal `MetalVoiceCLI`.
 3.  **Install**: Drag `MetalVoice.app` to your **Applications** folder.
 4.  **Open**: Right-click and choose **Open** (necessary for the first launch to verify the developer).
     *   *Note: If prompted about "Malicious Software", go to System Settings -> Privacy & Security -> Open Anyway.*
@@ -59,6 +59,17 @@
     *   *This routes the "Clean" audio into the cable.*
 4.  **Configure Apps**: inside Discord/Zoom/OBS, set your **Microphone Input** to that same Virtual Cable (e.g., BlackHole 2ch).
 5.  **Enable AI**: Toggle the switch **ON** in the MetalVoice menu. Enjoy crystal clear audio!
+
+## 💻 Advanced: Dual Pipelines (CLI)
+
+Need to filter your microphone for your meeting, AND filter your colleagues' audio coming into your headphones? Use the included CLI:
+
+1. Copy `MetalVoiceCLI` from the zip to a convenient folder.
+2. Open Terminal. Run `MetalVoiceCLI` to list your available Input/Output device names.
+3. Open Terminal 1 (Clean Your Mic):
+   `./MetalVoiceCLI --in "Built-in Microphone" --out "BlackHole 2ch" --gain 1.0`
+4. Open Terminal 2 (Clean Your Meeting):
+   `./MetalVoiceCLI --in "Loopback Audio" --out "MacBook Pro Speakers" --gain 1.5`
 
 ## 💻 Tech Stack
 

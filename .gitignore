@@ -9,6 +9,6 @@ derivedData/
 .swiftpm/
 configuration/registries/
 MetalVoice.app/
+MetalVoiceCLI
 *.zip
-*.mlpackage
-*.mlmodelc
+

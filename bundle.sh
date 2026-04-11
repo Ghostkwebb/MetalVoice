@@ -1,6 +1,6 @@
 #!/bin/bash
 APP_NAME="MetalVoice"
-BUILD_DIR=".build/debug"
+BUILD_DIR=".build/release"
 APP_BUNDLE="$APP_NAME.app"
 
 # Clean
@@ -24,5 +24,9 @@ cp "Resources/MetalVoiceLogo.png" "$APP_BUNDLE/Contents/Resources/"
 
 # Sign with Entitlements (Crucial for Microphone Access)
 codesign --force --deep --sign - --entitlements "Resources/MetalVoice.entitlements" "$APP_BUNDLE"
+
+# Export CLI
+cp "$BUILD_DIR/MetalVoiceCLI" .
+echo "Exported CLI to ./MetalVoiceCLI"
 
 echo "Bundled and Signed $APP_BUNDLE"

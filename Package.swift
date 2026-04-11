@@ -11,12 +11,12 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
-        .executableTarget(
-            name: "MetalVoice",
+        .target(
+            name: "Core",
             dependencies: [],
-            path: "Sources",
+            path: "Sources/Core",
             resources: [
-                .process("../Resources")
+                .copy("../../Resources")
             ],
             linkerSettings: [
                 .linkedFramework("AVFoundation"),
@@ -25,6 +25,19 @@ let package = Package(
                 .linkedFramework("CoreML"),
                 .linkedFramework("Accelerate")
             ]
+        ),
+        .executableTarget(
+            name: "MetalVoice",
+            dependencies: ["Core"],
+            path: "Sources/App",
+            resources: [
+                .process("../../Resources")
+            ]
+        ),
+        .executableTarget(
+            name: "MetalVoiceCLI",
+            dependencies: ["Core"],
+            path: "Sources/CLI"
         )
     ]
 )
