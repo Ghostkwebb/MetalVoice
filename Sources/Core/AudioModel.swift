@@ -277,8 +277,7 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     private var inputBuffer48k: AVAudioPCMBuffer?
     
     public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        // Reset converter to prevent EndOfStream state lockout from previous frame
-        inputConverter?.reset()
+        // Converter state persists for continuous stream. No reset needed.
         
         guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
         // Use AudioStreamBasicDescription to create AVAudioFormat
@@ -308,40 +307,20 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
               let inputBuffer = inputPCMBuffer,
               let outputBuffer = inputBuffer48k else { return }
               
-        // 4. Extract AudioBufferList from CMSampleBuffer
-        var audioBufferList = AudioBufferList()
-        var blockBuffer: CMBlockBuffer?
-        
-        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-            sampleBuffer,
-            bufferListSizeNeededOut: nil,
-            bufferListOut: &audioBufferList,
-            bufferListSize: MemoryLayout<AudioBufferList>.size,
-            blockBufferAllocator: nil,
-            blockBufferMemoryAllocator: nil,
-            flags: 0,
-            blockBufferOut: &blockBuffer
-        )
-        
-        guard status == noErr else { return }
-        
-        // 5. Copy Data to InputPCMBuffer
+        // 4. Copy Data Directly to InputPCMBuffer
         let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
         inputBuffer.frameLength = AVAudioFrameCount(numSamples)
         
-        // Use UnsafeMutableAudioBufferListPointer for safe iteration
-        let srcPtr = UnsafeMutableAudioBufferListPointer(&audioBufferList)
-        let dstPtr = UnsafeMutableAudioBufferListPointer(inputBuffer.mutableAudioBufferList)
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(numSamples),
+            into: inputBuffer.mutableAudioBufferList
+        )
         
-        let buffersToCheck = min(srcPtr.count, dstPtr.count)
-        
-        for i in 0..<buffersToCheck {
-            let src = srcPtr[i]
-            let dst = dstPtr[i]
-            
-            if dst.mDataByteSize >= src.mDataByteSize {
-                memcpy(dst.mData, src.mData, Int(src.mDataByteSize))
-            }
+        guard status == noErr else { 
+            print("AudioModel Error: CMSampleBufferCopyPCMDataIntoAudioBufferList failed with \(status)")
+            return 
         }
         
         // 6. Convert
@@ -355,11 +334,12 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
                haveFed = true
                return inputBuffer
            } else {
-               outStatus.pointee = .endOfStream
+               outStatus.pointee = .noDataNow
                return nil
            }
         }
         
+        outputBuffer.frameLength = outputBuffer.frameCapacity
         converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
         
         // 7. Write to Ring Buffer
