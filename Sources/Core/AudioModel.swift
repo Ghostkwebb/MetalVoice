@@ -8,26 +8,39 @@ import Accelerate
 
 public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     // Published State for UI
-    @Published public var isAIEnabled: Bool = false {
+    // UserDefaults keys for persisting the user's device + enable choices across launches.
+    private static let kInputUID = "mv.selectedInputUID"
+    private static let kOutputUID = "mv.selectedOutputUID"
+    private static let kAIEnabled = "mv.isAIEnabled"
+
+    @Published public var isAIEnabled: Bool = UserDefaults.standard.bool(forKey: AudioModel.kAIEnabled) {
         didSet {
+            UserDefaults.standard.set(isAIEnabled, forKey: AudioModel.kAIEnabled)
         }
     }
     @Published public var inputDevices: [AVCaptureDevice] = [] // Changed to AVCaptureDevice
     @Published public var selectedInputDeviceID: String = "" { // IDs are Strings in AVCapture
         didSet {
              setupCaptureSession()
+             if !selectedInputDeviceID.isEmpty {
+                 UserDefaults.standard.set(selectedInputDeviceID, forKey: AudioModel.kInputUID)
+             }
         }
     }
     @Published public var errorMessage: String?
     @Published public var inputLevel: Float = 0.0
     @Published public var activeOutputDeviceName: String = "Unknown"
     @Published public var permissionStatus: String = "Unknown"
-    
+
     // Output Selection
     @Published public var outputDevices: [DeviceStruct] = []
     @Published public var selectedOutputDeviceID: AudioObjectID = 0 {
         didSet {
              setupPlaybackEngine()
+             // Persist by stable CoreAudio device UID (AudioObjectID is not stable across launches).
+             if let dev = outputDevices.first(where: { $0.id == selectedOutputDeviceID }), !dev.uid.isEmpty {
+                 UserDefaults.standard.set(dev.uid, forKey: AudioModel.kOutputUID)
+             }
         }
     }
     
@@ -46,6 +59,7 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     public struct DeviceStruct: Identifiable {
         public let id: AudioObjectID
         public let name: String
+        public let uid: String
     }
     
     // Capture (Input)
@@ -65,6 +79,10 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     // Processing Modules
     // Processing Modules
     private let dspEngine = DeepFilterNetDSP()
+
+    // Serial queue for AVAudioEngine reconfiguration so engine.start()/device switches
+    // never block the main thread (on recent SDKs starting on a virtual device can stall AX).
+    private let engineQueue = DispatchQueue(label: "com.ghostkwebb.metalvoice.engine")
     
     public override init() {
         super.init()
@@ -145,16 +163,28 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
                 var namePtr: Unmanaged<CFString>?
                 var nameAddr = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyName, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
                 AudioObjectGetPropertyData(id, &nameAddr, 0, nil, &nameSize, &namePtr)
+
+                // Stable device UID — persists across launches/reboots, unlike AudioObjectID.
+                var uidStr = ""
+                var uidSize = UInt32(MemoryLayout<CFString?>.size)
+                var uidPtr: Unmanaged<CFString>?
+                var uidAddr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceUID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+                AudioObjectGetPropertyData(id, &uidAddr, 0, nil, &uidSize, &uidPtr)
+                if let cfu = uidPtr?.takeRetainedValue() { uidStr = cfu as String }
+
                 if let cf = namePtr?.takeRetainedValue() {
-                    newDevs.append(DeviceStruct(id: id, name: cf as String))
+                    newDevs.append(DeviceStruct(id: id, name: cf as String, uid: uidStr))
                 }
             }
         }
-        
+
         DispatchQueue.main.async {
             self.outputDevices = newDevs
-            // Default to BlackHole if exists
-            if let bh = newDevs.first(where: { $0.name.contains("BlackHole") }) {
+            // Restore the user's saved output device by UID; else default to BlackHole; else first.
+            let savedUID = UserDefaults.standard.string(forKey: AudioModel.kOutputUID)
+            if let su = savedUID, let saved = newDevs.first(where: { $0.uid == su }) {
+                self.selectedOutputDeviceID = saved.id
+            } else if let bh = newDevs.first(where: { $0.name.contains("BlackHole") }) {
                 self.selectedOutputDeviceID = bh.id
             } else if let first = newDevs.first {
                 self.selectedOutputDeviceID = first.id
@@ -165,37 +195,43 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     // ... input methods ...
     
     func setupPlaybackEngine() {
-        engine.stop()
-        engine.reset()
-        
-        // Output Device
-        if selectedOutputDeviceID != 0 {
-             var deviceID = selectedOutputDeviceID
-             let size = UInt32(MemoryLayout<AudioObjectID>.size)
-             AudioUnitSetProperty(outputNode.audioUnit!,
-                                  kAudioOutputUnitProperty_CurrentDevice,
-                                  kAudioUnitScope_Global,
-                                  0,
-                                  &deviceID,
-                                  size)
-             
-             // Update Name
-             if let dev = outputDevices.first(where: { $0.id == selectedOutputDeviceID }) {
-                 DispatchQueue.main.async { self.activeOutputDeviceName = dev.name }
-             }
-        }
+        // Run all engine reconfiguration off the main thread — on recent SDKs starting the
+        // engine on a virtual output device (e.g. BlackHole) can stall the caller, which froze
+        // the menu-bar UI when this ran synchronously during init / device-change didSet.
+        engineQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.engine.stop()
+            self.engine.reset()
 
-        // Attach Source
-        engine.attach(playbackSourceNode)
-        
-        // Connect
-        engine.connect(playbackSourceNode, to: mainMixer, format: AudioUtils.shared.processingFormat)
-        engine.connect(mainMixer, to: outputNode, format: nil)
-        
-        do {
-            try engine.start()
-        } catch {
-            print("Engine Error: \(error)")
+            // Output Device
+            if self.selectedOutputDeviceID != 0 {
+                 var deviceID = self.selectedOutputDeviceID
+                 let size = UInt32(MemoryLayout<AudioObjectID>.size)
+                 AudioUnitSetProperty(self.outputNode.audioUnit!,
+                                      kAudioOutputUnitProperty_CurrentDevice,
+                                      kAudioUnitScope_Global,
+                                      0,
+                                      &deviceID,
+                                      size)
+
+                 // Update Name
+                 if let dev = self.outputDevices.first(where: { $0.id == self.selectedOutputDeviceID }) {
+                     DispatchQueue.main.async { self.activeOutputDeviceName = dev.name }
+                 }
+            }
+
+            // Attach Source
+            self.engine.attach(self.playbackSourceNode)
+
+            // Connect
+            self.engine.connect(self.playbackSourceNode, to: self.mainMixer, format: AudioUtils.shared.processingFormat)
+            self.engine.connect(self.mainMixer, to: self.outputNode, format: nil)
+
+            do {
+                try self.engine.start()
+            } catch {
+                NSLog("MetalVoice engine start error: %@", String(describing: error))
+            }
         }
     }
     
@@ -226,7 +262,11 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
         
         DispatchQueue.main.async {
             self.inputDevices = devs
-            if let defaultDev = AVCaptureDevice.default(for: .audio) {
+            // Restore the user's saved input device by uniqueID; else system default; else first.
+            let savedIn = UserDefaults.standard.string(forKey: AudioModel.kInputUID)
+            if let si = savedIn, devs.contains(where: { $0.uniqueID == si }) {
+                self.selectedInputDeviceID = si
+            } else if let defaultDev = AVCaptureDevice.default(for: .audio) {
                  self.selectedInputDeviceID = defaultDev.uniqueID
             } else if let first = devs.first {
                 self.selectedInputDeviceID = first.uniqueID
