@@ -12,6 +12,10 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     private static let kInputUID = "mv.selectedInputUID"
     private static let kOutputUID = "mv.selectedOutputUID"
     private static let kAIEnabled = "mv.isAIEnabled"
+    private static let kOutputGain = "mv.outputGain"
+
+    // Guard to prevent fallback device selection from overwriting the user's saved preference.
+    private var isRestoringDefaults = false
 
     @Published public var isAIEnabled: Bool = UserDefaults.standard.bool(forKey: AudioModel.kAIEnabled) {
         didSet {
@@ -22,7 +26,7 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     @Published public var selectedInputDeviceID: String = "" { // IDs are Strings in AVCapture
         didSet {
              setupCaptureSession()
-             if !selectedInputDeviceID.isEmpty {
+             if !isRestoringDefaults && !selectedInputDeviceID.isEmpty {
                  UserDefaults.standard.set(selectedInputDeviceID, forKey: AudioModel.kInputUID)
              }
         }
@@ -38,7 +42,7 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
         didSet {
              setupPlaybackEngine()
              // Persist by stable CoreAudio device UID (AudioObjectID is not stable across launches).
-             if let dev = outputDevices.first(where: { $0.id == selectedOutputDeviceID }), !dev.uid.isEmpty {
+             if !isRestoringDefaults, let dev = outputDevices.first(where: { $0.id == selectedOutputDeviceID }), !dev.uid.isEmpty {
                  UserDefaults.standard.set(dev.uid, forKey: AudioModel.kOutputUID)
              }
         }
@@ -50,9 +54,13 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
         }
     }
     
-    @Published public var outputGainValue: Float = 1.0 {
+    @Published public var outputGainValue: Float = {
+        let saved = UserDefaults.standard.float(forKey: AudioModel.kOutputGain)
+        return saved > 0 ? saved : 1.0
+    }() {
         didSet {
              dspEngine.outputGain = outputGainValue
+             UserDefaults.standard.set(outputGainValue, forKey: AudioModel.kOutputGain)
         }
     }
 
@@ -181,6 +189,8 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
         DispatchQueue.main.async {
             self.outputDevices = newDevs
             // Restore the user's saved output device by UID; else default to BlackHole; else first.
+            self.isRestoringDefaults = true
+            defer { self.isRestoringDefaults = false }
             let savedUID = UserDefaults.standard.string(forKey: AudioModel.kOutputUID)
             if let su = savedUID, let saved = newDevs.first(where: { $0.uid == su }) {
                 self.selectedOutputDeviceID = saved.id
@@ -195,6 +205,11 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     // ... input methods ...
     
     func setupPlaybackEngine() {
+        // Capture @Published values on the calling thread to avoid reading them from engineQueue
+        // (data race: these are mutated on main, engineQueue is a different serial queue).
+        let deviceID = selectedOutputDeviceID
+        let devName = outputDevices.first(where: { $0.id == deviceID })?.name
+
         // Run all engine reconfiguration off the main thread — on recent SDKs starting the
         // engine on a virtual output device (e.g. BlackHole) can stall the caller, which froze
         // the menu-bar UI when this ran synchronously during init / device-change didSet.
@@ -204,19 +219,18 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
             self.engine.reset()
 
             // Output Device
-            if self.selectedOutputDeviceID != 0 {
-                 var deviceID = self.selectedOutputDeviceID
+            if deviceID != 0 {
+                 var id = deviceID
                  let size = UInt32(MemoryLayout<AudioObjectID>.size)
                  AudioUnitSetProperty(self.outputNode.audioUnit!,
                                       kAudioOutputUnitProperty_CurrentDevice,
                                       kAudioUnitScope_Global,
                                       0,
-                                      &deviceID,
+                                      &id,
                                       size)
 
-                 // Update Name
-                 if let dev = self.outputDevices.first(where: { $0.id == self.selectedOutputDeviceID }) {
-                     DispatchQueue.main.async { self.activeOutputDeviceName = dev.name }
+                 if let name = devName {
+                     DispatchQueue.main.async { self.activeOutputDeviceName = name }
                  }
             }
 
@@ -263,6 +277,8 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
         DispatchQueue.main.async {
             self.inputDevices = devs
             // Restore the user's saved input device by uniqueID; else system default; else first.
+            self.isRestoringDefaults = true
+            defer { self.isRestoringDefaults = false }
             let savedIn = UserDefaults.standard.string(forKey: AudioModel.kInputUID)
             if let si = savedIn, devs.contains(where: { $0.uniqueID == si }) {
                 self.selectedInputDeviceID = si
