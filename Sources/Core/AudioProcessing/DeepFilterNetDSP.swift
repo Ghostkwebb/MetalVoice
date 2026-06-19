@@ -28,6 +28,14 @@ class DeepFilterNetDSP {
     // AI Model
     private var model: DeepFilterNet3_Streaming?
     private var isModelLoaded = false
+
+    // Reusable CoreML I/O buffers — allocated once, refilled each hop (avoids per-hop MLMultiArray alloc)
+    private var specMulti: MLMultiArray!
+    private var erbMulti: MLMultiArray!
+    private var featMulti: MLMultiArray!
+    private var hEncMulti: MLMultiArray!
+    private var hErbMulti: MLMultiArray!
+    private var hDfMulti: MLMultiArray!
     
     // Normalizers
     private var erbNorm: MeanSubNormalizer?
@@ -153,7 +161,15 @@ class DeepFilterNetDSP {
         erbNorm = MeanSubNormalizer(count: 32)
         specNorm = UnitMagNormalizer(count: 481)
         featSpecNorm = UnitMagNormalizer(count: 96)
-        
+
+        // Preallocate reusable CoreML buffers (refilled each hop, never reallocated)
+        specMulti = try! MLMultiArray(shape: [1, 1, 10, 481, 2], dataType: .float32)
+        erbMulti = try! MLMultiArray(shape: [1, 1, 10, 32], dataType: .float32)
+        featMulti = try! MLMultiArray(shape: [1, 1, 10, 96, 2], dataType: .float32)
+        hEncMulti = try! MLMultiArray(shape: [1, 1, 256], dataType: .float16)
+        hErbMulti = try! MLMultiArray(shape: [1, 2, 256], dataType: .float16)
+        hDfMulti = try! MLMultiArray(shape: [1, 2, 256], dataType: .float16)
+
         // Load Model
         Task {
             do {
@@ -363,14 +379,7 @@ class DeepFilterNetDSP {
         // 4. Inference
         if isModelLoaded, let model = model {
             do {
-                // Prepare Inputs (Deep Copy Local Inputs to avoid race conditions with model buffers)
-                let specMulti = try MLMultiArray(shape: [1, 1, 10, 481, 2], dataType: .float32)
-                let erbMulti = try MLMultiArray(shape: [1, 1, 10, 32], dataType: .float32)
-                let featMulti = try MLMultiArray(shape: [1, 1, 10, 96, 2], dataType: .float32)
-                let hEncMulti = try MLMultiArray(shape: [1, 1, 256], dataType: .float16)
-                let hErbMulti = try MLMultiArray(shape: [1, 2, 256], dataType: .float16)
-                let hDfMulti = try MLMultiArray(shape: [1, 2, 256], dataType: .float16)
-                
+                // Reuse preallocated instance buffers (specMulti/erbMulti/... ) — no per-hop alloc.
                 // Copy History
                 specMulti.withUnsafeMutableBufferPointer(ofType: Float.self) { ptr, _ in
                     let c = min(ptr.count, specHistory.count)
@@ -385,56 +394,58 @@ class DeepFilterNetDSP {
                     for i in 0..<c { ptr[i] = featSpecHistory[i] }
                 }
                 
-                // Copy States (Float -> Float16 via NSNumber for safety)
-                for i in 0..<h_enc_buf.count { hEncMulti[i] = NSNumber(value: h_enc_buf[i]) }
-                for i in 0..<h_erb_buf.count { hErbMulti[i] = NSNumber(value: h_erb_buf[i]) }
-                for i in 0..<h_df_buf.count { hDfMulti[i] = NSNumber(value: h_df_buf[i]) }
+                // Copy hidden states (Float -> Float16) via direct buffer — no NSNumber boxing
+                hEncMulti.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
+                    let c = min(ptr.count, h_enc_buf.count)
+                    for i in 0..<c { ptr[i] = Float16(h_enc_buf[i]) }
+                }
+                hErbMulti.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
+                    let c = min(ptr.count, h_erb_buf.count)
+                    for i in 0..<c { ptr[i] = Float16(h_erb_buf[i]) }
+                }
+                hDfMulti.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
+                    let c = min(ptr.count, h_df_buf.count)
+                    for i in 0..<c { ptr[i] = Float16(h_df_buf[i]) }
+                }
                 
                 let input = DeepFilterNet3_StreamingInput(spec_buf: specMulti, feat_erb_buf: erbMulti, feat_spec_buf: featMulti, h_enc_in: hEncMulti, h_erb_in: hErbMulti, h_df_in: hDfMulti)
                 
                 let output = try model.prediction(input: input)
                 
-                // Copy Back States
+                // Copy back hidden states (Float16 -> Float) via direct buffer — no NSNumber boxing
                 let oEnc = output.h_enc_out
                 let oErb = output.h_erb_out
                 let oDf = output.h_df_out
-                
-                // Check if buffers match size (Safety)
-                if oEnc.count == h_enc_buf.count {
-                    for i in 0..<h_enc_buf.count { h_enc_buf[i] = oEnc[i].floatValue }
+                oEnc.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
+                    let c = min(ptr.count, h_enc_buf.count)
+                    for i in 0..<c { h_enc_buf[i] = Float(ptr[i]) }
                 }
-                if oErb.count == h_erb_buf.count {
-                    for i in 0..<h_erb_buf.count { h_erb_buf[i] = oErb[i].floatValue }
+                oErb.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
+                    let c = min(ptr.count, h_erb_buf.count)
+                    for i in 0..<c { h_erb_buf[i] = Float(ptr[i]) }
                 }
-                if oDf.count == h_df_buf.count {
-                    for i in 0..<h_df_buf.count { h_df_buf[i] = oDf[i].floatValue }
+                oDf.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
+                    let c = min(ptr.count, h_df_buf.count)
+                    for i in 0..<c { h_df_buf[i] = Float(ptr[i]) }
                 }
-                
-                // Process Output Spec
+
+                // Process Output Spec [1,1,1,481,2] float16 — direct buffer read
+                // (replaces ~962 NSNumber multi-index subscripts per hop, the dominant CPU cost)
+                let decompExp = (1.0 / compressP) - 1.0
                 let enhanced = output.enhanced_spec
-                let zero = NSNumber(value: 0)
-                let one = NSNumber(value: 1)
-                
-                for i in 0..<481 {
-                    let iNum = NSNumber(value: i)
-                    // Enhanced is 5D [1,1,1,481,2] - Compressed Normalized Complex Spec
-                    let valR = enhanced[[zero, zero, zero, iNum, zero] as [NSNumber]].floatValue
-                    let valI = enhanced[[zero, zero, zero, iNum, one] as [NSNumber]].floatValue
-                    
-                    // 1. De-Normalize (Undo UnitMag)
-                    let mean = specNorm?.magMean[i] ?? 1.0
-                    let compR = valR * mean
-                    let compI = valI * mean
-                    
-                    // 2. De-Compress (Undo 0.6 power)
-                    let compMag = sqrt(compR*compR + compI*compI)
-                    // Scale = Comp^((1/C) - 1)
-                    
-                    let decompExp = (1.0 / compressP) - 1.0
-                    let decompScale = pow(compMag + 1e-10, decompExp)
-                    
-                    realOut[i] = compR * decompScale
-                    imaginaryOut[i] = compI * decompScale
+                enhanced.withUnsafeMutableBufferPointer(ofType: Float16.self) { ebuf, _ in
+                    for i in 0..<481 {
+                        let valR = Float(ebuf[i * 2])
+                        let valI = Float(ebuf[i * 2 + 1])
+                        // De-normalize (undo UnitMag) then de-compress (undo 0.6 power)
+                        let mean = specNorm?.magMean[i] ?? 1.0
+                        let compR = valR * mean
+                        let compI = valI * mean
+                        let compMag = sqrt(compR * compR + compI * compI)
+                        let decompScale = pow(compMag + 1e-10, decompExp)
+                        realOut[i] = compR * decompScale
+                        imaginaryOut[i] = compI * decompScale
+                    }
                 }
                 
                 // Mirror for IFFT
