@@ -17,8 +17,8 @@
     Built exclusively for <b>Apple Silicon</b>, leveraging the Neural Engine for zero-latency performance.
   </p>
 
-  <a href="https://github.com/Ghostkwebb/MetalVoice/releases/latest/download/MetalVoice_v1.1.zip">
-    <img src="https://img.shields.io/badge/Download-MetalVoice_v1.1-blue?style=for-the-badge&logo=apple&logoColor=white" alt="Download MetalVoice" />
+  <a href="https://github.com/Ghostkwebb/MetalVoice/releases/latest/download/MetalVoice_v1.2.zip">
+    <img src="https://img.shields.io/badge/Download-MetalVoice_v1.2-blue?style=for-the-badge&logo=apple&logoColor=white" alt="Download MetalVoice" />
   </a>
 
 </div>
@@ -41,7 +41,7 @@
 ## 📥 Installation
 
 1.  **Download**: Get the latest version from the [Releases Page](https://github.com/Ghostkwebb/MetalVoice/releases/latest).
-2.  **Unzip**: Extract `MetalVoice_v1.1.zip`. Inside, you'll find the GUI `MetalVoice.app` and the terminal `MetalVoiceCLI`.
+2.  **Unzip**: Extract `MetalVoice_v1.2.zip`. Inside, you'll find the GUI `MetalVoice.app` and the terminal `MetalVoiceCLI`.
 3.  **Install**: Drag `MetalVoice.app` to your **Applications** folder.
 4.  **Open**: Right-click and choose **Open** (necessary for the first launch to verify the developer).
     *   *Note: If prompted about "Malicious Software", go to System Settings -> Privacy & Security -> Open Anyway.*

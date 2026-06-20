@@ -394,58 +394,63 @@ class DeepFilterNetDSP {
                     for i in 0..<c { ptr[i] = featSpecHistory[i] }
                 }
                 
-                // Copy hidden states (Float -> Float16) via direct buffer — no NSNumber boxing
-                hEncMulti.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
-                    let c = min(ptr.count, h_enc_buf.count)
-                    for i in 0..<c { ptr[i] = Float16(h_enc_buf[i]) }
-                }
-                hErbMulti.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
-                    let c = min(ptr.count, h_erb_buf.count)
-                    for i in 0..<c { ptr[i] = Float16(h_erb_buf[i]) }
-                }
-                hDfMulti.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
-                    let c = min(ptr.count, h_df_buf.count)
-                    for i in 0..<c { ptr[i] = Float16(h_df_buf[i]) }
+                // Copy hidden states (Float -> Float16). Direct buffer on macOS 15+; NSNumber fallback on 13-14.
+                if #available(macOS 15.0, *) {
+                    hEncMulti.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
+                        let c = min(ptr.count, h_enc_buf.count)
+                        for i in 0..<c { ptr[i] = Float16(h_enc_buf[i]) }
+                    }
+                    hErbMulti.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
+                        let c = min(ptr.count, h_erb_buf.count)
+                        for i in 0..<c { ptr[i] = Float16(h_erb_buf[i]) }
+                    }
+                    hDfMulti.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
+                        let c = min(ptr.count, h_df_buf.count)
+                        for i in 0..<c { ptr[i] = Float16(h_df_buf[i]) }
+                    }
+                } else {
+                    for i in 0..<h_enc_buf.count { hEncMulti[i] = NSNumber(value: h_enc_buf[i]) }
+                    for i in 0..<h_erb_buf.count { hErbMulti[i] = NSNumber(value: h_erb_buf[i]) }
+                    for i in 0..<h_df_buf.count { hDfMulti[i] = NSNumber(value: h_df_buf[i]) }
                 }
                 
                 let input = DeepFilterNet3_StreamingInput(spec_buf: specMulti, feat_erb_buf: erbMulti, feat_spec_buf: featMulti, h_enc_in: hEncMulti, h_erb_in: hErbMulti, h_df_in: hDfMulti)
                 
                 let output = try model.prediction(input: input)
                 
-                // Copy back hidden states (Float16 -> Float) via direct buffer — no NSNumber boxing
+                // Copy back hidden states via stride-safe subscript (output MLMultiArrays from
+                // Neural Engine may use non-row-major strides, so flat buffer access is unsafe).
                 let oEnc = output.h_enc_out
                 let oErb = output.h_erb_out
                 let oDf = output.h_df_out
-                oEnc.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
-                    let c = min(ptr.count, h_enc_buf.count)
-                    for i in 0..<c { h_enc_buf[i] = Float(ptr[i]) }
+                if oEnc.count == h_enc_buf.count {
+                    for i in 0..<h_enc_buf.count { h_enc_buf[i] = oEnc[i].floatValue }
                 }
-                oErb.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
-                    let c = min(ptr.count, h_erb_buf.count)
-                    for i in 0..<c { h_erb_buf[i] = Float(ptr[i]) }
+                if oErb.count == h_erb_buf.count {
+                    for i in 0..<h_erb_buf.count { h_erb_buf[i] = oErb[i].floatValue }
                 }
-                oDf.withUnsafeMutableBufferPointer(ofType: Float16.self) { ptr, _ in
-                    let c = min(ptr.count, h_df_buf.count)
-                    for i in 0..<c { h_df_buf[i] = Float(ptr[i]) }
+                if oDf.count == h_df_buf.count {
+                    for i in 0..<h_df_buf.count { h_df_buf[i] = oDf[i].floatValue }
                 }
 
-                // Process Output Spec [1,1,1,481,2] float16 — direct buffer read
-                // (replaces ~962 NSNumber multi-index subscripts per hop, the dominant CPU cost)
+                // Process Output Spec — stride-safe subscript read.
                 let decompExp = (1.0 / compressP) - 1.0
                 let enhanced = output.enhanced_spec
-                enhanced.withUnsafeMutableBufferPointer(ofType: Float16.self) { ebuf, _ in
-                    for i in 0..<481 {
-                        let valR = Float(ebuf[i * 2])
-                        let valI = Float(ebuf[i * 2 + 1])
-                        // De-normalize (undo UnitMag) then de-compress (undo 0.6 power)
-                        let mean = specNorm?.magMean[i] ?? 1.0
-                        let compR = valR * mean
-                        let compI = valI * mean
-                        let compMag = sqrt(compR * compR + compI * compI)
-                        let decompScale = pow(compMag + 1e-10, decompExp)
-                        realOut[i] = compR * decompScale
-                        imaginaryOut[i] = compI * decompScale
-                    }
+                let zero = NSNumber(value: 0)
+                let one = NSNumber(value: 1)
+                
+                for i in 0..<481 {
+                    let iNum = NSNumber(value: i)
+                    let valR = enhanced[[zero, zero, zero, iNum, zero] as [NSNumber]].floatValue
+                    let valI = enhanced[[zero, zero, zero, iNum, one] as [NSNumber]].floatValue
+                    
+                    let mean = specNorm?.magMean[i] ?? 1.0
+                    let compR = valR * mean
+                    let compI = valI * mean
+                    let compMag = sqrt(compR * compR + compI * compI)
+                    let decompScale = pow(compMag + 1e-10, decompExp)
+                    realOut[i] = compR * decompScale
+                    imaginaryOut[i] = compI * decompScale
                 }
                 
                 // Mirror for IFFT
