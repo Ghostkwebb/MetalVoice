@@ -91,7 +91,10 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     // Serial queue for AVAudioEngine reconfiguration so engine.start()/device switches
     // never block the main thread (on recent SDKs starting on a virtual device can stall AX).
     private let engineQueue = DispatchQueue(label: "com.ghostkwebb.metalvoice.engine")
-    
+
+    // Pending engine rebuild scheduled from a configuration-change notification.
+    private var engineRestartWork: DispatchWorkItem?
+
     public override init() {
         super.init()
         
@@ -144,8 +147,34 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
         fetchOutputDevices()
         setupCaptureSession()
         setupPlaybackEngine()
+
+        // AVAudioEngine stops itself whenever the I/O unit configuration changes
+        // (e.g. a Bluetooth headset flipping into HFP when its mic goes active).
+        // Without this observer the engine stays dead and the output device
+        // (BlackHole) receives silence forever.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleEngineConfigurationChange(_:)),
+            name: .AVAudioEngineConfigurationChange,
+            object: engine)
     }
-    
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func handleEngineConfigurationChange(_ note: Notification) {
+        // Route/format transitions (like the HFP flip) fire several of these in a
+        // burst; coalesce them and rebuild the engine once things settle.
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.engineRestartWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.setupPlaybackEngine() }
+            self.engineRestartWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        }
+    }
+
     func fetchOutputDevices() {
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
