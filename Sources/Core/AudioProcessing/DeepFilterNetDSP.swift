@@ -154,8 +154,9 @@ class DeepFilterNetDSP {
         // Init ERB Filters
         initFilterbank()
         
-        // Init OLA Buffer
+        // Init OLA Buffer and Output Pre-roll
         olaBuffer = [Float](repeating: 0, count: frameSize)
+        outputBuffer = [Float](repeating: 0, count: frameSize)
         
         // Init Normalizers
         erbNorm = MeanSubNormalizer(count: 32)
@@ -272,22 +273,16 @@ class DeepFilterNetDSP {
         }
         
         // 4. Fill Output
-        if outputBuffer.count >= count {
-            for i in 0..<count {
-                output[i] = outputBuffer[i]
-            }
-            outputBuffer.removeFirst(count)
-        } else {
-            // Underrun (should not happen if latency logic works, but pad silence)
-            let avail = outputBuffer.count
-            for i in 0..<avail {
-                output[i] = outputBuffer[i]
-            }
+        let avail = min(outputBuffer.count, count)
+        for i in 0..<avail {
+            output[i] = outputBuffer[i]
+        }
+        if avail < count {
             for i in avail..<count {
                 output[i] = 0
             }
-            outputBuffer.removeAll()
         }
+        outputBuffer.removeFirst(avail)
     }
     
     private func processHop(frame: [Float]) {

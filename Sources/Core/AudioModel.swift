@@ -194,24 +194,35 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
             let scope = kAudioObjectPropertyScopeOutput
             var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreamConfiguration, mScope: scope, mElement: 0)
             var size: UInt32 = 0
-            AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size)
-            if size > 0 {
-                var nameSize = UInt32(MemoryLayout<CFString?>.size)
-                var namePtr: Unmanaged<CFString>?
-                var nameAddr = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyName, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-                AudioObjectGetPropertyData(id, &nameAddr, 0, nil, &nameSize, &namePtr)
+            guard AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size) == noErr, size > 0 else { continue }
+            
+            let bufferListRaw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+            defer { bufferListRaw.deallocate() }
+            
+            guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, bufferListRaw) == noErr else { continue }
+            let bufferList = bufferListRaw.assumingMemoryBound(to: AudioBufferList.self)
+            let ablPtr = UnsafeMutableAudioBufferListPointer(bufferList)
+            var totalChannels = 0
+            for buf in ablPtr {
+                totalChannels += Int(buf.mNumberChannels)
+            }
+            guard totalChannels > 0 else { continue }
 
-                // Stable device UID — persists across launches/reboots, unlike AudioObjectID.
-                var uidStr = ""
-                var uidSize = UInt32(MemoryLayout<CFString?>.size)
-                var uidPtr: Unmanaged<CFString>?
-                var uidAddr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceUID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-                AudioObjectGetPropertyData(id, &uidAddr, 0, nil, &uidSize, &uidPtr)
-                if let cfu = uidPtr?.takeRetainedValue() { uidStr = cfu as String }
+            var nameSize = UInt32(MemoryLayout<CFString?>.size)
+            var namePtr: Unmanaged<CFString>?
+            var nameAddr = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyName, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            AudioObjectGetPropertyData(id, &nameAddr, 0, nil, &nameSize, &namePtr)
 
-                if let cf = namePtr?.takeRetainedValue() {
-                    newDevs.append(DeviceStruct(id: id, name: cf as String, uid: uidStr))
-                }
+            // Stable device UID — persists across launches/reboots, unlike AudioObjectID.
+            var uidStr = ""
+            var uidSize = UInt32(MemoryLayout<CFString?>.size)
+            var uidPtr: Unmanaged<CFString>?
+            var uidAddr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceUID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            AudioObjectGetPropertyData(id, &uidAddr, 0, nil, &uidSize, &uidPtr)
+            if let cfu = uidPtr?.takeRetainedValue() { uidStr = cfu as String }
+
+            if let cf = namePtr?.takeRetainedValue() {
+                newDevs.append(DeviceStruct(id: id, name: cf as String, uid: uidStr))
             }
         }
 
@@ -268,7 +279,12 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
 
             // Connect
             self.engine.connect(self.playbackSourceNode, to: self.mainMixer, format: AudioUtils.shared.processingFormat)
-            self.engine.connect(self.mainMixer, to: self.outputNode, format: nil)
+            let hwFormat = self.outputNode.outputFormat(forBus: 0)
+            if hwFormat.sampleRate > 0 && hwFormat.channelCount > 0 {
+                self.engine.connect(self.mainMixer, to: self.outputNode, format: hwFormat)
+            } else {
+                self.engine.connect(self.mainMixer, to: self.outputNode, format: nil)
+            }
 
             do {
                 try self.engine.start()
