@@ -25,6 +25,7 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     @Published public var inputDevices: [AVCaptureDevice] = [] // Changed to AVCaptureDevice
     @Published public var selectedInputDeviceID: String = "" { // IDs are Strings in AVCapture
         didSet {
+             guard selectedInputDeviceID != oldValue else { return }
              setupCaptureSession()
              if !isRestoringDefaults && !selectedInputDeviceID.isEmpty {
                  UserDefaults.standard.set(selectedInputDeviceID, forKey: AudioModel.kInputUID)
@@ -40,6 +41,7 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     @Published public var outputDevices: [DeviceStruct] = []
     @Published public var selectedOutputDeviceID: AudioObjectID = 0 {
         didSet {
+             guard selectedOutputDeviceID != oldValue else { return }
              setupPlaybackEngine()
              // Persist by stable CoreAudio device UID (AudioObjectID is not stable across launches).
              if !isRestoringDefaults, let dev = outputDevices.first(where: { $0.id == selectedOutputDeviceID }), !dev.uid.isEmpty {
@@ -91,6 +93,9 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     // Serial queue for AVAudioEngine reconfiguration so engine.start()/device switches
     // never block the main thread (on recent SDKs starting on a virtual device can stall AX).
     private let engineQueue = DispatchQueue(label: "com.ghostkwebb.metalvoice.engine")
+
+    // Flag to suppress self-triggered AVAudioEngineConfigurationChange notifications during internal setup
+    private var isReconfiguringEngine = false
 
     // Pending engine rebuild scheduled from a configuration-change notification.
     private var engineRestartWork: DispatchWorkItem?
@@ -166,14 +171,22 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     }
 
     @objc private func handleEngineConfigurationChange(_ note: Notification) {
-        // Route/format transitions (like the HFP flip) fire several of these in a
-        // burst; coalesce them and rebuild the engine once things settle.
+        // Ignore self-triggered notifications while setupPlaybackEngine() is actively running
+        guard !isReconfiguringEngine else { return }
+
+        // Route/format transitions (like the HFP flip or headphone unplug) fire several of these in a
+        // burst; coalesce them and only rebuild the engine if it was stopped unexpectedly.
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self = self, !self.isReconfiguringEngine else { return }
             self.engineRestartWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in self?.setupPlaybackEngine() }
+            let work = DispatchWorkItem { [weak self] in
+                guard let self = self, !self.isReconfiguringEngine else { return }
+                if !self.engine.isRunning {
+                    self.setupPlaybackEngine()
+                }
+            }
             self.engineRestartWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
         }
     }
 
@@ -257,6 +270,9 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
         // the menu-bar UI when this ran synchronously during init / device-change didSet.
         engineQueue.async { [weak self] in
             guard let self = self else { return }
+            self.isReconfiguringEngine = true
+            defer { self.isReconfiguringEngine = false }
+
             self.engine.stop()
             self.engine.reset()
 
