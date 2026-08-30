@@ -114,10 +114,12 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
                  return noErr
             }
             
-            // 2. Latency
+            // 2. Latency & Jitter Buffer Protection
+            // Target is 2400 samples (50ms). Only drop if backlog exceeds 2x target + count,
+            // giving USB audio interfaces headroom for burst packet delivery without starvation.
             let latencyTarget = 2400
             let available = bufferRef.count
-            if available > (latencyTarget + count) {
+            if available > (latencyTarget * 2 + count) {
                 bufferRef.drop(available - latencyTarget)
             }
             
@@ -262,12 +264,16 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
             if deviceID != 0 {
                  var id = deviceID
                  let size = UInt32(MemoryLayout<AudioObjectID>.size)
-                 AudioUnitSetProperty(self.outputNode.audioUnit!,
-                                      kAudioOutputUnitProperty_CurrentDevice,
-                                      kAudioUnitScope_Global,
-                                      0,
-                                      &id,
-                                      size)
+                 if let au = self.outputNode.audioUnit {
+                     AudioUnitUninitialize(au)
+                     AudioUnitSetProperty(au,
+                                          kAudioOutputUnitProperty_CurrentDevice,
+                                          kAudioUnitScope_Global,
+                                          0,
+                                          &id,
+                                          size)
+                     AudioUnitInitialize(au)
+                 }
 
                  if let name = devName {
                      DispatchQueue.main.async { self.activeOutputDeviceName = name }
@@ -310,13 +316,15 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     
     func fetchInputDevices() {
         // AVCaptureDeviceDiscovery
-        let types: [AVCaptureDevice.DeviceType] = [.builtInMicrophone, .externalUnknown] // .externalUnknown covers USB mics usually
+        let types: [AVCaptureDevice.DeviceType]
+        if #available(macOS 14.0, *) {
+            types = [.microphone, .external]
+        } else {
+            types = [.builtInMicrophone, .externalUnknown]
+        }
         let session = AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .audio, position: .unspecified)
-        // Note: AVCaptureDevice doesn't easily show "Loopback" devices like BlackHole.
-        // But for "Microphone" input, that is what we want.
         
         var devs = session.devices
-        // Sort: Built-in first?
         devs.sort { $0.localizedName < $1.localizedName }
         
         DispatchQueue.main.async {
@@ -404,12 +412,23 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
              inputBuffer48k = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: maxOutputFrames)
         }
         
+        let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
+        guard numSamples > 0 else { return }
+
+        // Dynamically grow buffer capacity if a high sample-rate interface delivers larger chunks
+        if numSamples > (inputPCMBuffer?.frameCapacity ?? 0) {
+            let newCapacity = AVAudioFrameCount(max(numSamples * 2, 4096))
+            inputPCMBuffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: newCapacity)
+            let ratio = targetFormat.sampleRate / inputFormat.sampleRate
+            let maxOutputFrames = AVAudioFrameCount(Double(newCapacity) * ratio + 100)
+            inputBuffer48k = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: maxOutputFrames)
+        }
+
         guard let converter = inputConverter,
               let inputBuffer = inputPCMBuffer,
               let outputBuffer = inputBuffer48k else { return }
               
         // 4. Copy Data Directly to InputPCMBuffer
-        let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
         inputBuffer.frameLength = AVAudioFrameCount(numSamples)
         
         let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
@@ -420,7 +439,7 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
         )
         
         guard status == noErr else { 
-            print("AudioModel Error: CMSampleBufferCopyPCMDataIntoAudioBufferList failed with \(status)")
+            NSLog("MetalVoice Error: CMSampleBufferCopyPCMDataIntoAudioBufferList failed with %d", status)
             return 
         }
         
