@@ -17,8 +17,8 @@
     Built exclusively for <b>Apple Silicon</b>, leveraging the Neural Engine for zero-latency performance.
   </p>
 
-  <a href="https://github.com/Ghostkwebb/MetalVoice/releases/latest/download/MetalVoice_v1.2.4.zip">
-    <img src="https://img.shields.io/badge/Download-MetalVoice_v1.2.4-blue?style=for-the-badge&logo=apple&logoColor=white" alt="Download MetalVoice" />
+  <a href="https://github.com/Ghostkwebb/MetalVoice/releases/latest/download/MetalVoice_v1.2.5.zip">
+    <img src="https://img.shields.io/badge/Download-MetalVoice_v1.2.5-blue?style=for-the-badge&logo=apple&logoColor=white" alt="Download MetalVoice" />
   </a>
 
 </div>
@@ -37,11 +37,12 @@
 *   **⚡ Zero Latency Feel**: Optimized Metal pipeline ensures negligible delay tailored for real-time communication.
 *   **🔒 Privacy First**: 100% On-Device. Your voice is processed locally on your Neural Engine. No data leaves your Mac.
 *   **🛠️ Universal**: Works with **any** microphone (USB, XLR, Built-in) and outputs to **any** app via virtual cables.
+*   **🔄 Automatic Updates**: Check for updates and install new releases directly from the App and CLI.
 
 ## 📥 Installation
 
 1.  **Download**: Get the latest version from the [Releases Page](https://github.com/Ghostkwebb/MetalVoice/releases/latest).
-2.  **Unzip**: Extract `MetalVoice_v1.2.4.zip`. Inside, you'll find the GUI `MetalVoice.app` and the terminal `MetalVoiceCLI`.
+2.  **Unzip**: Extract `MetalVoice_v1.2.5.zip`. Inside, you'll find the GUI `MetalVoice.app` and the terminal `MetalVoiceCLI`.
 3.  **Install**: Drag `MetalVoice.app` to your **Applications** folder.
 4.  **Open**: Right-click and choose **Open** (necessary for the first launch to verify the developer).
     *   *Note: If prompted about "Malicious Software", go to System Settings -> Privacy & Security -> Open Anyway.*
@@ -60,16 +61,54 @@
 4.  **Configure Apps**: inside Discord/Zoom/OBS, set your **Microphone Input** to that same Virtual Cable (e.g., BlackHole 2ch).
 5.  **Enable AI**: Toggle the switch **ON** in the MetalVoice menu. Enjoy crystal clear audio!
 
-## 💻 Advanced: Dual Pipelines (CLI)
+## 💻 Terminal CLI & Interactive Dashboard
 
-Need to filter your microphone for your meeting, AND filter your colleagues' audio coming into your headphones? Use the included CLI:
+`MetalVoiceCLI` is included for lightweight terminal workflows, automated scripts, or dual-pipeline audio filtering (e.g. mic filtering + incoming call filtering):
 
-1. Copy `MetalVoiceCLI` from the zip to a convenient folder.
-2. Open Terminal. Run `MetalVoiceCLI` to list your available Input/Output device names.
-3. Open Terminal 1 (Clean Your Mic):
-   `./MetalVoiceCLI --in "Built-in Microphone" --out "BlackHole 2ch" --gain 1.0`
-4. Open Terminal 2 (Clean Your Meeting):
-   `./MetalVoiceCLI --in "Loopback Audio" --out "MacBook Pro Speakers" --gain 1.5`
+### Interactive Mode:
+Simply run `./MetalVoiceCLI` without arguments:
+1. Choose your microphone and output device with a single keystroke.
+2. An **Apple-grade responsive live audio dashboard** provides real-time VU level metering without spamming terminal history.
+
+```text
+  MetalVoice v1.2.5 • Live Audio Pipeline
+  ──────────────────────────────────────────────────────────────────────────────
+
+  🎙️  INPUT       MacBook Pro Microphone [48000Hz, 1ch Planar]
+     Level       [■■■■■■■■■■·························] 0.0847 RMS (94 pkts/s)
+
+  ⚡  AI DSP      ● ACTIVE (DeepFilterNet)     Gain: 100%
+     Output      [■··································] 0.0031 RMS (94 renders/s)
+
+  📦  BUFFER      1024 frames (0 drops, 0 underruns)
+
+  🔊  OUTPUT      BlackHole 2ch [48000Hz, 2ch Planar]
+     Status      ● STREAMING
+
+  ──────────────────────────────────────────────────────────────────────────────
+   Q  Quit   A  AI (ON)   T  Tone (OFF)   + / -  Gain (100%)   H  History   U  Upgrade
+  ──────────────────────────────────────────────────────────────────────────────
+```
+
+### Live Interactive Hotkeys:
+* `Q` $\to$ Quit cleanly
+* `A` $\to$ Toggle DeepFilterNet AI noise reduction ON/OFF
+* `T` $\to$ Toggle synthetic 440Hz diagnostic test tone
+* `+` / `-` $\to$ Live output volume gain adjustment
+* `H` $\to$ Toggle between the live dashboard and scrolling log history
+* `U` $\to$ Upgrade in-place when a new release is available
+
+### Command Line Options & Scripting:
+```bash
+# Direct flag launch (no prompts)
+./MetalVoiceCLI --in "MacBook Pro Microphone" --out "BlackHole 2ch" --gain 1.0
+
+# Check for updates
+./MetalVoiceCLI --check-update
+
+# Automatically download & install the latest release
+./MetalVoiceCLI --update
+```
 
 ## 💻 Tech Stack
 

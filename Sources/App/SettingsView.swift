@@ -24,9 +24,10 @@ struct SettingsView: View {
 // MARK: - General Tab
 struct GeneralSettingsView: View {
     @ObservedObject var audioModel: AudioModel
+    @StateObject private var updateChecker = UpdateChecker.shared
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             
             // Header
             HStack {
@@ -34,7 +35,7 @@ struct GeneralSettingsView: View {
                     .font(.headline)
                 Spacer()
             }
-            .padding(.bottom, 4)
+            .padding(.bottom, 2)
             
             // Gain Control Section
             VStack(alignment: .leading, spacing: 12) {
@@ -79,12 +80,81 @@ struct GeneralSettingsView: View {
                 }
             }
             .padding()
-            .background(Color(nsColor: .controlBackgroundColor)) // Standard container background
+            .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(10)
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
             )
+            
+            // Software Updates Section
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("Software Updates", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Spacer()
+                    
+                    if updateChecker.isChecking {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button("Check for Updates") {
+                            updateChecker.checkForUpdates()
+                        }
+                        .controlSize(.small)
+                    }
+                }
+                
+                if let release = updateChecker.latestRelease {
+                    if release.isNewer {
+                        HStack {
+                            Image(systemName: "sparkles")
+                                .foregroundColor(.orange)
+                            Text("New version available: **\(release.tagName)**")
+                                .font(.caption)
+                            Spacer()
+                            if let dl = release.downloadURL, let url = URL(string: dl) {
+                                Link("Download", destination: url)
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                            } else if let url = URL(string: release.htmlURL) {
+                                Link("View Release", destination: url)
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                            }
+                        }
+                        .padding(8)
+                        .background(Color.orange.opacity(0.12))
+                        .cornerRadius(6)
+                    } else {
+                        Text("MetalVoice is up to date (v\(UpdateChecker.currentVersion))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                } else if let error = updateChecker.errorMessage {
+                    Text("Update check failed: \(error)")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                } else {
+                    Text("Current version: v\(UpdateChecker.currentVersion)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding()
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            )
+            .onAppear {
+                if updateChecker.latestRelease == nil && !updateChecker.isChecking {
+                    updateChecker.checkForUpdates()
+                }
+            }
             
             Spacer()
             
@@ -92,7 +162,7 @@ struct GeneralSettingsView: View {
             HStack {
                 Image(systemName: "info.circle")
                     .foregroundColor(.secondary)
-                Text("MetalVoice v1.2.4 • Built with DeepFilterNet")
+                Text("MetalVoice v\(UpdateChecker.currentVersion) • Built with DeepFilterNet")
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 Spacer()

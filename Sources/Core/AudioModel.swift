@@ -100,6 +100,73 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
     // Pending engine rebuild scheduled from a configuration-change notification.
     private var engineRestartWork: DispatchWorkItem?
 
+    // Diagnostic metrics (thread-safe lock for atomic reporting)
+    private let diagLock = NSLock()
+    private var diagCapturePackets = 0
+    private var diagCaptureFormatDesc = "None"
+    private var diagCaptureLastRMS: Float = 0.0
+    private var diagRenderCallbacks = 0
+    private var diagRenderDrops = 0
+    private var diagRenderUnderflows = 0
+    private var diagRenderLastRMS: Float = 0.0
+    private var diagOutputHwFormatDesc = "None"
+
+    public struct DiagnosticsSnapshot {
+        public let timestamp: Date
+        public let inputDeviceName: String
+        public let inputFormat: String
+        public let inputRMS: Float
+        public let capturePacketsPerSec: Int
+        public let ringBufferAvailable: Int
+        public let ringBufferDrops: Int
+        public let ringBufferUnderflows: Int
+        public let renderCallbacksPerSec: Int
+        public let renderOutputRMS: Float
+        public let outputDeviceName: String
+        public let outputFormat: String
+        public let isAIEnabled: Bool
+        public let isEngineRunning: Bool
+    }
+
+    public func getDiagnosticsSnapshot() -> DiagnosticsSnapshot {
+        diagLock.lock()
+        let capturePkts = diagCapturePackets
+        diagCapturePackets = 0
+        let inFormat = diagCaptureFormatDesc
+        let inRMS = diagCaptureLastRMS
+        
+        let renderCb = diagRenderCallbacks
+        diagRenderCallbacks = 0
+        let renderDrops = diagRenderDrops
+        diagRenderDrops = 0
+        let renderUnderflows = diagRenderUnderflows
+        diagRenderUnderflows = 0
+        let outRMS = diagRenderLastRMS
+        let outHwFormat = diagOutputHwFormatDesc
+        diagLock.unlock()
+        
+        let inDev = inputDevices.first(where: { $0.uniqueID == selectedInputDeviceID })?.localizedName ?? "None"
+        let outDev = activeOutputDeviceName
+        let bufAvail = ringBuffer.count
+        
+        return DiagnosticsSnapshot(
+            timestamp: Date(),
+            inputDeviceName: inDev,
+            inputFormat: inFormat,
+            inputRMS: inRMS,
+            capturePacketsPerSec: capturePkts,
+            ringBufferAvailable: bufAvail,
+            ringBufferDrops: renderDrops,
+            ringBufferUnderflows: renderUnderflows,
+            renderCallbacksPerSec: renderCb,
+            renderOutputRMS: outRMS,
+            outputDeviceName: outDev,
+            outputFormat: outHwFormat,
+            isAIEnabled: isAIEnabled,
+            isEngineRunning: engine.isRunning
+        )
+    }
+
     public override init() {
         super.init()
         
@@ -116,6 +183,10 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
                  for i in 0..<count {
                      data[i] = Float.random(in: -0.1...0.1) 
                  }
+                 self.diagLock.lock()
+                 self.diagRenderCallbacks += 1
+                 self.diagRenderLastRMS = 0.0577
+                 self.diagLock.unlock()
                  return noErr
             }
             
@@ -125,25 +196,48 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
             let latencyTarget = 2400
             let available = bufferRef.count
             if available > (latencyTarget * 2 + count) {
-                bufferRef.drop(available - latencyTarget)
+                let dropped = available - latencyTarget
+                bufferRef.drop(dropped)
+                if let self = self {
+                    self.diagLock.lock()
+                    self.diagRenderDrops += dropped
+                    self.diagLock.unlock()
+                }
             }
             
             // 3. Read
             // DSP Engine needs contiguous flow. If we underflow, we feed silence.
             if !bufferRef.read(into: data, count: count) {
                 AudioUtils.shared.fillSilence(data, count: count)
+                if let self = self {
+                    self.diagLock.lock()
+                    self.diagRenderUnderflows += count
+                    self.diagLock.unlock()
+                }
                 return noErr
             }
             
             // 4. Processing
-            
             // Gain (Boost Mic)
-            var gain: Float = 1.0
+            var gain: Float = self?.outputGainValue ?? 1.0
             vDSP_vsmul(data, 1, &gain, data, 1, vDSP_Length(frameCount))
             
             if let self = self, self.isAIEnabled {
                 // DSP STFT Pipeline
                 dsp.process(input: data, count: count, output: data)
+            }
+
+            // Measure Render RMS for diagnostics
+            var sum: Float = 0
+            for i in stride(from: 0, to: min(count, 256), by: 4) {
+                sum += data[i] * data[i]
+            }
+            let outRMS = sqrt(sum / Float(min(count, 256)/4 + 1))
+            if let self = self {
+                self.diagLock.lock()
+                self.diagRenderCallbacks += 1
+                self.diagRenderLastRMS = outRMS
+                self.diagLock.unlock()
             }
             
             return noErr
@@ -302,6 +396,10 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
             // Connect
             self.engine.connect(self.playbackSourceNode, to: self.mainMixer, format: AudioUtils.shared.processingFormat)
             let hwFormat = self.outputNode.outputFormat(forBus: 0)
+            self.diagLock.lock()
+            self.diagOutputHwFormatDesc = "\(Int(hwFormat.sampleRate))Hz \(hwFormat.channelCount)ch (\(hwFormat.isInterleaved ? "Interleaved" : "Planar"))"
+            self.diagLock.unlock()
+
             if hwFormat.sampleRate > 0 && hwFormat.channelCount > 0 {
                 self.engine.connect(self.mainMixer, to: self.outputNode, format: hwFormat)
             } else {
@@ -366,6 +464,10 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
         captureSession.outputs.forEach { captureSession.removeOutput($0) }
         
         do {
+            guard !selectedInputDeviceID.isEmpty else {
+                captureSession.commitConfiguration()
+                return
+            }
             guard let device = AVCaptureDevice(uniqueID: selectedInputDeviceID) else {
                 print("Device not found: \(selectedInputDeviceID)")
                 captureSession.commitConfiguration()
@@ -488,10 +590,14 @@ public class AudioModel: NSObject, ObservableObject, AVCaptureAudioDataOutputSam
              for i in stride(from: 0, to: min(convertedFrames, 256), by: 4) {
                  sum += floatData[i] * floatData[i]
              }
-             if convertedFrames > 0 {
-                 let rms = sqrt(sum / Float(min(convertedFrames, 256)/4 + 1))
-                 DispatchQueue.main.async { self.inputLevel = rms }
-             }
+             let rms = sqrt(sum / Float(min(convertedFrames, 256)/4 + 1))
+             DispatchQueue.main.async { self.inputLevel = rms }
+
+             self.diagLock.lock()
+             self.diagCapturePackets += 1
+             self.diagCaptureFormatDesc = "\(Int(inputFormat.sampleRate))Hz \(inputFormat.channelCount)ch (\(inputFormat.isInterleaved ? "Interleaved" : "Planar"))"
+             self.diagCaptureLastRMS = rms
+             self.diagLock.unlock()
              
              // Push 48k Float32 to RingBuffer
              _ = self.ringBuffer.write(floatData, count: convertedFrames)
